@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.2",
+  "checkpoint_id": "aafcc5cff4c2",
+  "strategy": "manual-commit",
+  "branch": "fix/import-blueprint-phase-ordering",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "internal/modules/import_module/import.go"
+  ],
+  "sessions": [
+    {
+      "metadata": "/aa/fcc5cff4c2/0/metadata.json",
+      "transcript": "/aa/fcc5cff4c2/0/full.jsonl",
+      "context": "/aa/fcc5cff4c2/0/context.md",
+      "content_hash": "/aa/fcc5cff4c2/0/content_hash.txt",
+      "prompt": "/aa/fcc5cff4c2/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 11,
+    "cache_creation_tokens": 2577,
+    "cache_read_tokens": 571785,
+    "output_tokens": 1425,
+    "api_call_count": 9
+  }
+}
