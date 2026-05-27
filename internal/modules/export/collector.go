@@ -52,6 +52,7 @@ type Data struct {
 	Pages             []api.Page
 	Integrations      []api.Integration
 	TimeoutErrors     []string // Blueprints that timed out during export
+	Warnings          []string // Non-fatal issues encountered during collection
 }
 
 // Collector collects data from Port API concurrently.
@@ -289,7 +290,9 @@ func (c *Collector) Collect(ctx context.Context, opts Options) (*Data, error) {
 					g.Go(func() error {
 						perms, err := c.client.GetActionPermissions(ctx, aID)
 						if err != nil {
-							// Non-fatal: skip silently
+							mu.Lock()
+							data.Warnings = append(data.Warnings, fmt.Sprintf("failed to fetch permissions for action %s: %v", aID, err))
+							mu.Unlock()
 							return nil
 						}
 						mu.Lock()
@@ -308,7 +311,9 @@ func (c *Collector) Collect(ctx context.Context, opts Options) (*Data, error) {
 			g.Go(func() error {
 				perms, err := c.client.GetBlueprintPermissions(ctx, bpIDCopy)
 				if err != nil {
-					// Non-fatal: permissions fetch failure should not abort the export
+					mu.Lock()
+					data.Warnings = append(data.Warnings, fmt.Sprintf("failed to fetch permissions for blueprint %s: %v", bpIDCopy, err))
+					mu.Unlock()
 					return nil
 				}
 				mu.Lock()
@@ -371,7 +376,9 @@ func (c *Collector) Collect(ctx context.Context, opts Options) (*Data, error) {
 				g.Go(func() error {
 					perms, err := c.client.GetActionPermissions(ctx, aID)
 					if err != nil {
-						// Non-fatal: skip silently
+						mu.Lock()
+						data.Warnings = append(data.Warnings, fmt.Sprintf("failed to fetch permissions for action %s: %v", aID, err))
+						mu.Unlock()
 						return nil
 					}
 					mu.Lock()

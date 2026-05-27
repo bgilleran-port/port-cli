@@ -80,6 +80,8 @@ type Result struct {
 	PagesSkipped                         int
 	IntegrationsUpdated                  int
 	IntegrationsSkipped                  int
+	BlueprintPermissionsUpdated          int
+	ActionPermissionsUpdated             int
 	Errors                               []string
 	DiffResult                           *import_module.DiffResult
 	IgnoredRuleResultTargetRelationCount int
@@ -123,8 +125,13 @@ func (m *Module) Execute(ctx context.Context, opts Options) (*Result, error) {
 		return nil, fmt.Errorf("failed to import to target: %w", err)
 	}
 
-	result.Success = true
-	result.Message = "Migration completed successfully"
+	if len(result.Errors) > 0 {
+		result.Success = false
+		result.Message = fmt.Sprintf("Migration completed with %d error(s)", len(result.Errors))
+	} else {
+		result.Success = true
+		result.Message = "Migration completed successfully"
+	}
 	result.DiffResult = diffResult
 	return result, nil
 }
@@ -132,32 +139,34 @@ func (m *Module) Execute(ctx context.Context, opts Options) (*Result, error) {
 // generateDryRunResult generates a dry run result with accurate predictions.
 func (m *Module) generateDryRunResult(diffResult *import_module.DiffResult) *Result {
 	return &Result{
-		Success:             true,
-		Message:             "Migration validation passed (dry run - no changes applied)",
-		BlueprintsCreated:   len(diffResult.BlueprintsToCreate),
-		BlueprintsUpdated:   len(diffResult.BlueprintsToUpdate),
-		BlueprintsSkipped:   len(diffResult.BlueprintsToSkip),
-		EntitiesCreated:     len(diffResult.EntitiesToCreate),
-		EntitiesUpdated:     len(diffResult.EntitiesToUpdate),
-		EntitiesSkipped:     len(diffResult.EntitiesToSkip),
-		ScorecardsCreated:   len(diffResult.ScorecardsToCreate),
-		ScorecardsUpdated:   len(diffResult.ScorecardsToUpdate),
-		ScorecardsSkipped:   len(diffResult.ScorecardsToSkip),
-		ActionsCreated:      len(diffResult.ActionsToCreate),
-		ActionsUpdated:      len(diffResult.ActionsToUpdate),
-		ActionsSkipped:      len(diffResult.ActionsToSkip),
-		TeamsCreated:        len(diffResult.TeamsToCreate),
-		TeamsUpdated:        len(diffResult.TeamsToUpdate),
-		TeamsSkipped:        len(diffResult.TeamsToSkip),
-		UsersCreated:        len(diffResult.UsersToCreate),
-		UsersUpdated:        len(diffResult.UsersToUpdate),
-		UsersSkipped:        len(diffResult.UsersToSkip),
-		PagesCreated:        len(diffResult.PagesToCreate),
-		PagesUpdated:        len(diffResult.PagesToUpdate),
-		PagesSkipped:        len(diffResult.PagesToSkip),
-		IntegrationsUpdated: len(diffResult.IntegrationsToUpdate),
-		IntegrationsSkipped: len(diffResult.IntegrationsToSkip),
-		DiffResult:          diffResult,
+		Success:                     true,
+		Message:                     "Migration validation passed (dry run - no changes applied)",
+		BlueprintsCreated:           len(diffResult.BlueprintsToCreate),
+		BlueprintsUpdated:           len(diffResult.BlueprintsToUpdate),
+		BlueprintsSkipped:           len(diffResult.BlueprintsToSkip),
+		EntitiesCreated:             len(diffResult.EntitiesToCreate),
+		EntitiesUpdated:             len(diffResult.EntitiesToUpdate),
+		EntitiesSkipped:             len(diffResult.EntitiesToSkip),
+		ScorecardsCreated:           len(diffResult.ScorecardsToCreate),
+		ScorecardsUpdated:           len(diffResult.ScorecardsToUpdate),
+		ScorecardsSkipped:           len(diffResult.ScorecardsToSkip),
+		ActionsCreated:              len(diffResult.ActionsToCreate),
+		ActionsUpdated:              len(diffResult.ActionsToUpdate),
+		ActionsSkipped:              len(diffResult.ActionsToSkip),
+		TeamsCreated:                len(diffResult.TeamsToCreate),
+		TeamsUpdated:                len(diffResult.TeamsToUpdate),
+		TeamsSkipped:                len(diffResult.TeamsToSkip),
+		UsersCreated:                len(diffResult.UsersToCreate),
+		UsersUpdated:                len(diffResult.UsersToUpdate),
+		UsersSkipped:                len(diffResult.UsersToSkip),
+		PagesCreated:                len(diffResult.PagesToCreate),
+		PagesUpdated:                len(diffResult.PagesToUpdate),
+		PagesSkipped:                len(diffResult.PagesToSkip),
+		IntegrationsUpdated:         len(diffResult.IntegrationsToUpdate),
+		IntegrationsSkipped:         len(diffResult.IntegrationsToSkip),
+		BlueprintPermissionsUpdated: len(diffResult.BlueprintPermissions),
+		ActionPermissionsUpdated:    len(diffResult.ActionPermissions),
+		DiffResult:                  diffResult,
 	}
 }
 
@@ -221,15 +230,17 @@ func (m *Module) exportFromSource(ctx context.Context, opts Options) (*export.Da
 	iterBlueprints, dataBlueprints := export.ApplyBlueprintExclusions(resolvedBlueprints, excludeDeep, excludeSchema)
 
 	data := &export.Data{
-		Blueprints:   dataBlueprints,
-		Entities:     []api.Entity{},
-		Scorecards:   []api.Scorecard{},
-		Actions:      []api.Action{},
-		Teams:        []api.Team{},
-		Users:        []api.User{},
-		Folders:      []api.Folder{},
-		Pages:        []api.Page{},
-		Integrations: []api.Integration{},
+		Blueprints:           dataBlueprints,
+		Entities:             []api.Entity{},
+		Scorecards:           []api.Scorecard{},
+		Actions:              []api.Action{},
+		Teams:                []api.Team{},
+		Users:                []api.User{},
+		Folders:              []api.Folder{},
+		Pages:                []api.Page{},
+		Integrations:         []api.Integration{},
+		BlueprintPermissions: make(map[string]api.Permissions),
+		ActionPermissions:    make(map[string]api.Permissions),
 	}
 
 	// Use errgroup for concurrent collection
@@ -302,6 +313,40 @@ func (m *Module) exportFromSource(ctx context.Context, opts Options) (*export.Da
 				mu.Lock()
 				data.Actions = append(data.Actions, actions...)
 				mu.Unlock()
+
+				// Fetch permissions for each action
+				for _, action := range actions {
+					actionID, ok := action["identifier"].(string)
+					if !ok {
+						continue
+					}
+					aID := actionID
+					g.Go(func() error {
+						perms, err := m.sourceClient.GetActionPermissions(ctx, aID)
+						if err != nil {
+							return nil
+						}
+						mu.Lock()
+						data.ActionPermissions[aID] = perms
+						mu.Unlock()
+						return nil
+					})
+				}
+				return nil
+			})
+		}
+
+		// Collect blueprint permissions
+		if shouldCollect("blueprint-permissions", opts.IncludeResources) || len(opts.IncludeResources) == 0 {
+			bpIDCopy := bpID
+			g.Go(func() error {
+				perms, err := m.sourceClient.GetBlueprintPermissions(ctx, bpIDCopy)
+				if err != nil {
+					return nil
+				}
+				mu.Lock()
+				data.BlueprintPermissions[bpIDCopy] = perms
+				mu.Unlock()
 				return nil
 			})
 		}
@@ -347,6 +392,25 @@ func (m *Module) exportFromSource(ctx context.Context, opts Options) (*export.Da
 			mu.Lock()
 			data.Actions = append(data.Actions, allActions...)
 			mu.Unlock()
+
+			// Fetch permissions for each org-wide action
+			for _, action := range allActions {
+				actionID, ok := action["identifier"].(string)
+				if !ok {
+					continue
+				}
+				aID := actionID
+				g.Go(func() error {
+					perms, err := m.sourceClient.GetActionPermissions(ctx, aID)
+					if err != nil {
+						return nil
+					}
+					mu.Lock()
+					data.ActionPermissions[aID] = perms
+					mu.Unlock()
+					return nil
+				})
+			}
 			return nil
 		})
 	}
@@ -1320,6 +1384,22 @@ func (m *Module) importToTarget(ctx context.Context, data *export.Data, diffResu
 	// Wait for all imports to complete
 	if err := g.Wait(); err != nil {
 		return nil, err
+	}
+
+	// Import permissions (blueprint and action permissions depend on resources existing)
+	for _, change := range diffResult.BlueprintPermissions {
+		if _, err := m.targetClient.UpdateBlueprintPermissions(origCtx, change.Identifier, change.Permissions); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("Blueprint permissions %s: %v", change.Identifier, err))
+		} else {
+			result.BlueprintPermissionsUpdated++
+		}
+	}
+	for _, change := range diffResult.ActionPermissions {
+		if _, err := m.targetClient.UpdateActionPermissions(origCtx, change.Identifier, change.Permissions); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("Action permissions %s: %v", change.Identifier, err))
+		} else {
+			result.ActionPermissionsUpdated++
+		}
 	}
 
 	// Set skipped counts from diff result

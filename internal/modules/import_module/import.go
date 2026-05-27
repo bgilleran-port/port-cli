@@ -65,28 +65,30 @@ type ValidationWarning struct {
 
 // Result represents the result of an import operation.
 type Result struct {
-	Success             bool
-	Message             string
-	BlueprintsCreated   int
-	BlueprintsUpdated   int
-	EntitiesCreated     int
-	EntitiesUpdated     int
-	ScorecardsCreated   int
-	ScorecardsUpdated   int
-	ActionsCreated      int
-	ActionsUpdated      int
-	TeamsCreated        int
-	TeamsUpdated        int
-	UsersCreated        int
-	UsersUpdated        int
-	PagesCreated        int
-	PagesUpdated        int
-	IntegrationsUpdated int
-	Errors              []string
-	ErrorsByCategory    map[string][]string // Categorized errors for verbose output
-	Warnings            []ValidationWarning // Pre-import validation warnings
-	DiffResult          *DiffResult
-	SidebarPipeline     []string
+	Success                     bool
+	Message                     string
+	BlueprintsCreated           int
+	BlueprintsUpdated           int
+	EntitiesCreated             int
+	EntitiesUpdated             int
+	ScorecardsCreated           int
+	ScorecardsUpdated           int
+	ActionsCreated              int
+	ActionsUpdated              int
+	TeamsCreated                int
+	TeamsUpdated                int
+	UsersCreated                int
+	UsersUpdated                int
+	PagesCreated                int
+	PagesUpdated                int
+	IntegrationsUpdated         int
+	BlueprintPermissionsUpdated int
+	ActionPermissionsUpdated    int
+	Errors                      []string
+	ErrorsByCategory            map[string][]string // Categorized errors for verbose output
+	Warnings                    []ValidationWarning // Pre-import validation warnings
+	DiffResult                  *DiffResult
+	SidebarPipeline             []string
 	// IgnoredRuleResultTargetRelationCount is how many _rule_result relations with type rule_result_target were omitted from API payloads.
 	IgnoredRuleResultTargetRelationCount int
 	// IgnoredRuleResultTargetRelationKeys lists relation identifiers omitted (sorted, unique).
@@ -158,9 +160,16 @@ func (m *Module) Execute(ctx context.Context, opts Options) (*Result, error) {
 
 	// Merge any permission errors into result
 	result.Errors = importer.errors.ToStringSlice()
+	result.BlueprintPermissionsUpdated = len(diffResult.BlueprintPermissions)
+	result.ActionPermissionsUpdated = len(diffResult.ActionPermissions)
 
-	result.Success = true
-	result.Message = "Successfully imported data"
+	if len(result.Errors) > 0 {
+		result.Success = false
+		result.Message = fmt.Sprintf("Import completed with %d error(s)", len(result.Errors))
+	} else {
+		result.Success = true
+		result.Message = "Successfully imported data"
+	}
 	result.DiffResult = diffResult
 	result.SidebarPipeline = DescribeSidebarPipeline(sidebarPipeline)
 	return result, nil
@@ -170,24 +179,26 @@ func (m *Module) Execute(ctx context.Context, opts Options) (*Result, error) {
 func (m *Module) generateDryRunResult(data *export.Data, diffResult *DiffResult, _ Options) *Result {
 	if diffResult != nil {
 		return &Result{
-			Success:             true,
-			Message:             "Validation passed (dry run - no changes applied)",
-			BlueprintsCreated:   len(diffResult.BlueprintsToCreate),
-			BlueprintsUpdated:   len(diffResult.BlueprintsToUpdate),
-			EntitiesCreated:     len(diffResult.EntitiesToCreate),
-			EntitiesUpdated:     len(diffResult.EntitiesToUpdate),
-			ScorecardsCreated:   len(diffResult.ScorecardsToCreate),
-			ScorecardsUpdated:   len(diffResult.ScorecardsToUpdate),
-			ActionsCreated:      len(diffResult.ActionsToCreate),
-			ActionsUpdated:      len(diffResult.ActionsToUpdate),
-			TeamsCreated:        len(diffResult.TeamsToCreate),
-			TeamsUpdated:        len(diffResult.TeamsToUpdate),
-			UsersCreated:        len(diffResult.UsersToCreate),
-			UsersUpdated:        len(diffResult.UsersToUpdate),
-			PagesCreated:        len(diffResult.PagesToCreate),
-			PagesUpdated:        len(diffResult.PagesToUpdate),
-			IntegrationsUpdated: len(diffResult.IntegrationsToUpdate),
-			DiffResult:          diffResult,
+			Success:                     true,
+			Message:                     "Validation passed (dry run - no changes applied)",
+			BlueprintsCreated:           len(diffResult.BlueprintsToCreate),
+			BlueprintsUpdated:           len(diffResult.BlueprintsToUpdate),
+			EntitiesCreated:             len(diffResult.EntitiesToCreate),
+			EntitiesUpdated:             len(diffResult.EntitiesToUpdate),
+			ScorecardsCreated:           len(diffResult.ScorecardsToCreate),
+			ScorecardsUpdated:           len(diffResult.ScorecardsToUpdate),
+			ActionsCreated:              len(diffResult.ActionsToCreate),
+			ActionsUpdated:              len(diffResult.ActionsToUpdate),
+			TeamsCreated:                len(diffResult.TeamsToCreate),
+			TeamsUpdated:                len(diffResult.TeamsToUpdate),
+			UsersCreated:                len(diffResult.UsersToCreate),
+			UsersUpdated:                len(diffResult.UsersToUpdate),
+			PagesCreated:                len(diffResult.PagesToCreate),
+			PagesUpdated:                len(diffResult.PagesToUpdate),
+			IntegrationsUpdated:         len(diffResult.IntegrationsToUpdate),
+			BlueprintPermissionsUpdated: len(diffResult.BlueprintPermissions),
+			ActionPermissionsUpdated:    len(diffResult.ActionPermissions),
+			DiffResult:                  diffResult,
 		}
 	}
 
