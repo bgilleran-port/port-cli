@@ -39,7 +39,17 @@ from Port.`,
 }
 
 func registerSkillsInit() *cobra.Command {
-	return &cobra.Command{
+	var (
+		yes          bool
+		tools        []string
+		groups       []string
+		skillsIDs    []string
+		allGroups    bool
+		allUngrouped bool
+		installHooks bool
+	)
+
+	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Install AI session-start hooks and sync skills from Port",
 		Long: `Install AI session-start hooks for Cursor, Claude Code, Gemini CLI, OpenAI Codex, Windsurf, and GitHub Copilot.
@@ -52,15 +62,33 @@ the repository root).
 Skills are written to the correct location based on each skill's 'location'
 property in Port ("global" → AI tool directories, "project" → tool directory
 inside each registered project directory). For Copilot, both global and
-project skills from Port are written under <repo>/.github/skills/port/.`,
+project skills from Port are written under <repo>/.github/skills/port/.
+
+Use --yes with --tool, --group, --skill, and/or --all-groups / --all-ungrouped
+to run non-interactively (for scripts and CI). Use --install-hooks=false to
+register sync targets without modifying hooks.json or tool settings files.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			flags := GetGlobalFlags(ctx)
 			configManager := config.NewConfigManager(flags.ConfigFile)
 
-			targets, err := promptTargetSelection(configManager)
-			if err != nil {
-				return err
+			var targets []skills.HookTarget
+			var loadOpts skills.LoadSkillsOptions
+			var rawFetched *skills.FetchedSkills
+
+			if yes {
+				var err error
+				targets, err = resolveInitTargets(configManager, tools)
+				if err != nil {
+					return err
+				}
+				loadOpts = buildInitLoadSkillsOpts(allGroups, allUngrouped, groups, skillsIDs)
+			} else {
+				var err error
+				targets, err = promptTargetSelection(configManager)
+				if err != nil {
+					return err
+				}
 			}
 
 			mod, configManager, err := newSkillsModuleWithFlags(ctx, flags)
@@ -69,19 +97,34 @@ project skills from Port are written under <repo>/.github/skills/port/.`,
 			}
 
 			initResult, err := mod.Init(ctx, skills.InitOptions{
-				Targets: targets,
+				Targets:      targets,
+				InstallHooks: installHooks,
 			})
 			if err != nil {
-				return fmt.Errorf("failed to install hooks: %w", err)
+				return fmt.Errorf("failed to initialize skills: %w", err)
 			}
 
-			for _, t := range initResult.InstalledTargets {
-				lipgloss.Printf("%s Hook installed in %s\n", styles.CheckMark, styles.Bold.Render(t))
+			if installHooks {
+				for _, t := range initResult.InstalledTargets {
+					lipgloss.Printf("%s Hook installed in %s\n", styles.CheckMark, styles.Bold.Render(t))
+				}
+			} else {
+				for _, t := range initResult.InstalledTargets {
+					lipgloss.Printf("%s Registered sync target %s (hooks not installed)\n", styles.CheckMark, styles.Bold.Render(t))
+				}
 			}
 
-			loadOpts, rawFetched, err := buildLoadSkillsOpts(ctx, mod, true)
-			if err != nil {
-				return err
+			if !yes {
+				var err error
+				loadOpts, rawFetched, err = buildLoadSkillsOpts(ctx, mod, true)
+				if err != nil {
+					return err
+				}
+			} else {
+				rawFetched, err = mod.FetchSkills(ctx)
+				if err != nil {
+					return fmt.Errorf("failed to fetch skills from Port: %w", err)
+				}
 			}
 			loadOpts.Fetched = rawFetched
 
@@ -101,6 +144,43 @@ project skills from Port are written under <repo>/.github/skills/port/.`,
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Non-interactive mode: skip prompts (use with --tool and/or selection flags)")
+	cmd.Flags().StringArrayVar(&tools, "tool", nil, "AI tool name to configure (repeatable, e.g. \"Cursor\")")
+	cmd.Flags().StringArrayVar(&groups, "group", nil, "Skill group identifier to sync (repeatable; ignored when --all-groups is set)")
+	cmd.Flags().StringArrayVar(&skillsIDs, "skill", nil, "Ungrouped skill identifier to sync (repeatable; ignored when --all-ungrouped is set)")
+	cmd.Flags().BoolVar(&allGroups, "all-groups", false, "Sync all optional skill groups")
+	cmd.Flags().BoolVar(&allUngrouped, "all-ungrouped", false, "Sync all optional ungrouped skills")
+	cmd.Flags().BoolVar(&installHooks, "install-hooks", true, "Install port skills sync into AI tool hooks/settings files")
+	return cmd
+}
+
+func resolveInitTargets(configManager *config.ConfigManager, toolNames []string) ([]skills.HookTarget, error) {
+	if len(toolNames) > 0 {
+		return resolveTargetsByName(toolNames)
+	}
+	names, err := configuredHookTargetNames(configManager)
+	if err != nil {
+		return nil, err
+	}
+	if len(names) > 0 {
+		return resolveTargetsByName(names)
+	}
+	return nil, fmt.Errorf("non-interactive init requires --tool or existing configured targets in ~/.port/config.yaml")
+}
+
+func buildInitLoadSkillsOpts(allGroups, allUngrouped bool, groups, skillIDs []string) skills.LoadSkillsOptions {
+	opts := skills.LoadSkillsOptions{
+		SelectAllGroups:    allGroups,
+		SelectAllUngrouped: allUngrouped,
+	}
+	if !allGroups && len(groups) > 0 {
+		opts.SelectedGroups = groups
+	}
+	if !allUngrouped && len(skillIDs) > 0 {
+		opts.SelectedSkills = skillIDs
+	}
+	return opts
 }
 
 func registerSkillsAdd() *cobra.Command {

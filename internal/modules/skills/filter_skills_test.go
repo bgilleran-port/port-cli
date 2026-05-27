@@ -10,6 +10,24 @@ import (
 	"github.com/port-experimental/port-cli/internal/api"
 )
 
+func respondSkillBlueprints(w http.ResponseWriter, r *http.Request, versioned bool) bool {
+	if r.URL.Path != "/blueprints" {
+		return false
+	}
+	bps := []map[string]interface{}{
+		{"identifier": "skill_group"},
+		{"identifier": "skill"},
+	}
+	if versioned {
+		bps = append(bps,
+			map[string]interface{}{"identifier": "skill_version"},
+			map[string]interface{}{"identifier": "skill_file"},
+		)
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "blueprints": bps})
+	return true
+}
+
 func TestFilterSkills(t *testing.T) {
 	tests := []struct {
 		name               string
@@ -223,6 +241,9 @@ func TestLoadLatestVersionFiles_FiltersSourcePathsAsVersioned(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
 			return
 		}
+		if respondSkillBlueprints(w, r, true) {
+			return
+		}
 		switch r.URL.Path {
 		case "/blueprints/skill_version/entities/search":
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -282,14 +303,10 @@ func TestLoadLatestVersionFiles_RefetchesLegacyContentWhenVersionBlueprintMissin
 			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
 			return
 		}
+		if respondSkillBlueprints(w, r, false) {
+			return
+		}
 		switch r.URL.Path {
-		case "/blueprints/skill_version/entities/search":
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"ok":      false,
-				"error":   "blueprint_not_found",
-				"message": "Blueprint skill_version does not exist",
-			})
 		case "/blueprints/skill/entities/search":
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"ok": true,
@@ -334,6 +351,9 @@ func TestLoadSyncableFetchedSkills_DropsVersionedSkillsWithoutContent(t *testing
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/auth/access_token" {
 			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
+			return
+		}
+		if respondSkillBlueprints(w, r, true) {
 			return
 		}
 		switch r.URL.Path {

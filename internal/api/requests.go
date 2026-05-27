@@ -944,7 +944,11 @@ func (c *Client) UpdateActionPermissions(ctx context.Context, actionIdentifier s
 
 // GetSkillGroups retrieves all skill_group blueprint entities from Port.
 func (c *Client) GetSkillGroups(ctx context.Context) ([]Entity, error) {
-	entities, err := c.SearchEntities(ctx, "skill_group", map[string]interface{}{
+	bps, err := c.ResolveSkillBlueprints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	entities, err := c.SearchEntities(ctx, bps.SkillGroup, map[string]interface{}{
 		"limit": 1000,
 		"query": map[string]interface{}{
 			"combinator": "and",
@@ -954,14 +958,18 @@ func (c *Client) GetSkillGroups(ctx context.Context) ([]Entity, error) {
 	if err != nil {
 		// Fall back to the legacy GET endpoint for Port instances that do not
 		// support the search endpoint for skill_group.
-		return c.GetEntities(ctx, "skill_group", nil)
+		return c.GetEntities(ctx, bps.SkillGroup, nil)
 	}
 	return entities, nil
 }
 
 // GetSkills retrieves all skill blueprint entities from Port.
 func (c *Client) GetSkills(ctx context.Context) ([]Entity, error) {
-	entities, err := c.SearchEntities(ctx, "skill", map[string]interface{}{
+	bps, err := c.ResolveSkillBlueprints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	entities, err := c.SearchEntities(ctx, bps.Skill, map[string]interface{}{
 		"limit": 1000,
 		"query": map[string]interface{}{
 			"combinator": "and",
@@ -976,7 +984,7 @@ func (c *Client) GetSkills(ctx context.Context) ([]Entity, error) {
 	})
 	if err != nil {
 		if isInvalidSkillRelationIncludeError(err) {
-			return c.GetEntities(ctx, "skill", nil)
+			return c.GetEntities(ctx, bps.Skill, nil)
 		}
 		return nil, err
 	}
@@ -996,7 +1004,14 @@ func (c *Client) GetSkillVersionsForSkills(ctx context.Context, skillIdentifiers
 	if len(skillIdentifiers) == 0 {
 		return nil, nil
 	}
-	return c.SearchEntities(ctx, "skill_version", map[string]interface{}{
+	bps, err := c.ResolveSkillBlueprints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if bps.SkillVersion == "" {
+		return nil, nil
+	}
+	return c.SearchEntities(ctx, bps.SkillVersion, map[string]interface{}{
 		"limit": 1000,
 		"query": map[string]interface{}{
 			"combinator": "and",
@@ -1023,7 +1038,14 @@ func (c *Client) GetSkillFilesForVersions(ctx context.Context, versionIdentifier
 	if len(versionIdentifiers) == 0 {
 		return nil, nil
 	}
-	return c.SearchEntities(ctx, "skill_file", map[string]interface{}{
+	bps, err := c.ResolveSkillBlueprints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if bps.SkillFile == "" {
+		return nil, nil
+	}
+	return c.SearchEntities(ctx, bps.SkillFile, map[string]interface{}{
 		"limit": 1000,
 		"query": map[string]interface{}{
 			"combinator": "and",

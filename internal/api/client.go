@@ -26,6 +26,7 @@ type Client struct {
 	tokenMgr   *TokenManager
 	apiURL     string
 	timeout    time.Duration
+	skillBPs   *skillBlueprintCache
 }
 
 // TokenResponse represents the Port API token response.

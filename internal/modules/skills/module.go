@@ -42,7 +42,8 @@ func (m *Module) LoadSyncableFetchedSkills(ctx context.Context, fetched *Fetched
 
 // InitOptions holds options for the init operation.
 type InitOptions struct {
-	Targets []HookTarget
+	Targets      []HookTarget
+	InstallHooks bool // when false, skips writing hooks.json / settings entries
 }
 
 // InitResult holds the result of an init operation.
@@ -64,8 +65,10 @@ func (m *Module) Init(ctx context.Context, opts InitOptions) (*InitResult, error
 		return nil, fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	if err := InstallHooks(opts.Targets, home, cwd); err != nil {
-		return nil, fmt.Errorf("failed to install hooks: %w", err)
+	if opts.InstallHooks {
+		if err := InstallHooks(opts.Targets, home, cwd); err != nil {
+			return nil, fmt.Errorf("failed to install hooks: %w", err)
+		}
 	}
 
 	targetPaths := TargetPaths(opts.Targets, home, cwd)

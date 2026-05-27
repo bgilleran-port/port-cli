@@ -9,7 +9,7 @@ Supported tools: **Cursor**, **Claude Code**, **Gemini CLI**, **OpenAI Codex**,
 ## Prerequisites
 
 - `port` CLI installed (`npm install -g @port-experimental/port-cli` or download from [GitHub Releases](https://github.com/port-experimental/port-cli/releases))
-- A Port account with skills configured in the `skill` and `skill_group` blueprints
+- A Port account with skills configured in Port (`_skill` / `_skill_group` or `skill` / `skill_group` blueprints)
 - At least one supported AI tool installed
 
 ---
@@ -51,9 +51,31 @@ You will be asked two questions:
 
 After confirming your selection, the CLI:
 
-- Writes (or merges) a `hooks.json` / `settings.json` into each AI tool directory
+- Writes (or merges) a `hooks.json` / `settings.json` into each AI tool directory (unless you pass `--install-hooks=false`)
 - Immediately syncs the selected skills to the correct locations (see below)
 - Saves your selection to `~/.port/config.yaml` so future syncs are automatic
+
+### Non-interactive init (scripts / CI)
+
+Pass `--yes` (`-y`) together with the values you want to preselect. Prompts are skipped only when `--yes` is set.
+
+```sh
+port skills init --yes \
+  --tool Cursor --tool "Claude Code" \
+  --all-groups --all-ungrouped
+```
+
+| Flag | Description |
+| ---- | ----------- |
+| `--yes` / `-y` | Required to skip interactive prompts |
+| `--tool` | AI tool name (repeatable); uses saved targets from config if omitted |
+| `--group` | Optional group identifier to sync (repeatable; ignored when `--all-groups` is set) |
+| `--skill` | Optional ungrouped skill identifier (repeatable; ignored when `--all-ungrouped` is set) |
+| `--all-groups` | Sync all optional skill groups |
+| `--all-ungrouped` | Sync all optional ungrouped skills |
+| `--install-hooks` | Install session hooks (default `true`; use `--install-hooks=false` to only register sync paths) |
+
+With `--install-hooks=false`, the CLI still saves tool paths in `~/.port/config.yaml` and syncs skills to disk, but does not modify `hooks.json` or tool settings files. Run `port skills sync` manually or add your own hook entries.
 
 ---
 
@@ -184,8 +206,11 @@ port cache clear --force
 <repo>/.github/hooks/hooks.json       ← sessionStart → port skills sync (Copilot)
 
 port skills sync
-  └─ GET /v1/blueprints/skill_group/entities
-  └─ GET /v1/blueprints/skill/entities
+  └─ Resolve blueprint IDs (prefixed _skill_* first, then skill_*)
+  └─ GET /v1/blueprints/{skill_group}/entities
+  └─ GET /v1/blueprints/{skill}/entities
+  └─ When skill_version + skill_file exist: fetch latest version + files per skill
+  └─ Otherwise: legacy content from the skill entity (instructions, references, …)
   └─ for each skill, checks skill.properties.location:
        "global"  → writes to every AI tool dir configured during init
                    e.g. ~/.cursor/skills/port/{group}/{skill}/SKILL.md
@@ -313,9 +338,17 @@ Whichever method you use, `port skills sync` will pick up the latest state of al
 
 ---
 
+**Which blueprint names does the CLI use?**
+
+On each run the CLI lists your Port blueprints and picks the first matching family:
+
+1. `_skill_group`, `_skill`, and optionally `_skill_version`, `_skill_file`
+2. Otherwise `skill_group`, `skill`, and optionally `skill_version`, `skill_file`
+3. If version/file blueprints are missing, content is read from the `skill` entity (legacy model)
+
 **Does the CLI support skill versioning?**
 
-No. The CLI always reflects the current state of skill entities in Port — there is no version history or rollback for locally synced skills. If you need versioning, manage it at the source: use your VCS or Port's audit log to track changes to skill entity properties over time.
+When `skill_version` and `skill_file` (or their `_`-prefixed equivalents) exist, the CLI syncs the **latest** version per skill. There is no local version history or rollback — use Port or your VCS for that.
 
 ---
 
@@ -339,7 +372,7 @@ Not at this time. Skills are private to your Port organization. There is no publ
 
 **Port API errors**
 
-- Confirm your Port account has the `skill` and `skill_group` blueprints set up.
+- Confirm your Port account has skills blueprints (`_skill` / `_skill_group` or `skill` / `skill_group`).
 - Check your API URL with `port config --show`.
 
 **GitHub Copilot hooks not working**

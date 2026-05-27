@@ -13,12 +13,31 @@ import (
 	"github.com/port-experimental/port-cli/internal/auth"
 )
 
+func respondStandardSkillBlueprints(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Path != "/blueprints" {
+		return false
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok": true,
+		"blueprints": []map[string]interface{}{
+			{"identifier": "skill_group"},
+			{"identifier": "skill"},
+			{"identifier": "skill_version"},
+			{"identifier": "skill_file"},
+		},
+	})
+	return true
+}
+
 func TestGetSkillVersionsForSkills_PaginatesSearchResults(t *testing.T) {
 	var requestPaths []string
 	var requestBodies []map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/auth/access_token" {
 			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
+			return
+		}
+		if respondStandardSkillBlueprints(w, r) {
 			return
 		}
 		requestPaths = append(requestPaths, r.URL.Path)
@@ -83,6 +102,9 @@ func TestGetSkillFilesForVersions_UsesRelationPathSearch(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
 			return
 		}
+		if respondStandardSkillBlueprints(w, r) {
+			return
+		}
 		requestPaths = append(requestPaths, r.URL.Path)
 		var requestBody map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
@@ -142,6 +164,9 @@ func TestGetSkills_IncludesSkillGroupRelation(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
 			return
 		}
+		if respondStandardSkillBlueprints(w, r) {
+			return
+		}
 		requestPath = r.URL.Path
 		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
 			t.Fatalf("decode request body: %v", err)
@@ -195,6 +220,9 @@ func TestGetSkills_FallsBackToLegacyEntitiesWhenRelationMissing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/auth/access_token" {
 			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "accessToken": "tok", "expiresIn": 3600})
+			return
+		}
+		if respondStandardSkillBlueprints(w, r) {
 			return
 		}
 		paths = append(paths, r.URL.Path)

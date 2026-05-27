@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,23 @@ import (
 
 	"github.com/port-experimental/port-cli/internal/config"
 )
+
+func TestModule_Init_SkipsHooksWhenDisabled(t *testing.T) {
+	mod, cm, tmpDir := newTestModule(t)
+	targets := []HookTarget{{Name: "Cursor", Dir: ".cursor", Format: hookFormatJSON}}
+	_, err := mod.Init(context.Background(), InitOptions{Targets: targets, InstallHooks: false})
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	assertFileAbsent(t, filepath.Join(tmpDir, ".cursor", "hooks.json"))
+	cfg, err := cm.LoadSkillsConfig()
+	if err != nil {
+		t.Fatalf("LoadSkillsConfig: %v", err)
+	}
+	if len(cfg.Targets) != 1 {
+		t.Fatalf("expected 1 target saved, got %d", len(cfg.Targets))
+	}
+}
 
 func TestModule_Init_InstallsHooksAndSavesConfig(t *testing.T) {
 	_, cm, tmpDir := newTestModule(t)

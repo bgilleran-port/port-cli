@@ -94,6 +94,14 @@ func isMissingSkillBlueprintError(err error) bool {
 // skill_version and its related skill_file entities. Legacy organizations that
 // do not have the versioned blueprints keep the original skill JSON content.
 func LoadLatestVersionFiles(ctx context.Context, client *api.Client, skills []Skill) ([]Skill, error) {
+	bps, err := client.ResolveSkillBlueprints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !bps.HasVersionedBlueprints() {
+		return loadLegacySkillContent(ctx, client, skills)
+	}
+
 	skillIDs := skillIdentifiers(skills)
 	versions, err := client.GetSkillVersionsForSkills(ctx, skillIDs)
 	if err != nil {
@@ -147,11 +155,15 @@ func LoadLatestVersionFiles(ctx context.Context, client *api.Client, skills []Sk
 }
 
 func loadLegacySkillContent(ctx context.Context, client *api.Client, skills []Skill) ([]Skill, error) {
+	bps, err := client.ResolveSkillBlueprints(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// Fetch full skill entities (all properties) without an include filter so
 	// that legacy fields like instructions, references, assets, and scripts are
 	// present. SearchEntities is used here for pagination; omitting the include
 	// key causes Port to return all properties.
-	entities, err := client.SearchEntities(ctx, "skill", map[string]interface{}{
+	entities, err := client.SearchEntities(ctx, bps.Skill, map[string]interface{}{
 		"limit": 1000,
 		"query": map[string]interface{}{
 			"combinator": "and",
