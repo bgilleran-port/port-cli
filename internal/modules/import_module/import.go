@@ -84,6 +84,7 @@ type Result struct {
 	IntegrationsUpdated         int
 	BlueprintPermissionsUpdated int
 	ActionPermissionsUpdated    int
+	PagePermissionsUpdated      int
 	Errors                      []string
 	ErrorsByCategory            map[string][]string // Categorized errors for verbose output
 	Warnings                    []ValidationWarning // Pre-import validation warnings
@@ -162,6 +163,7 @@ func (m *Module) Execute(ctx context.Context, opts Options) (*Result, error) {
 	result.Errors = importer.errors.ToStringSlice()
 	result.BlueprintPermissionsUpdated = len(diffResult.BlueprintPermissions)
 	result.ActionPermissionsUpdated = len(diffResult.ActionPermissions)
+	result.PagePermissionsUpdated = len(diffResult.PagePermissions)
 
 	if len(result.Errors) > 0 {
 		result.Success = false
@@ -198,6 +200,7 @@ func (m *Module) generateDryRunResult(data *export.Data, diffResult *DiffResult,
 			IntegrationsUpdated:         len(diffResult.IntegrationsToUpdate),
 			BlueprintPermissionsUpdated: len(diffResult.BlueprintPermissions),
 			ActionPermissionsUpdated:    len(diffResult.ActionPermissions),
+			PagePermissionsUpdated:      len(diffResult.PagePermissions),
 			DiffResult:                  diffResult,
 		}
 	}
@@ -2457,6 +2460,13 @@ func (i *Importer) importPermissions(ctx context.Context, diff *DiffResult) {
 	for _, change := range diff.ActionPermissions {
 		if _, err := i.client.UpdateActionPermissions(ctx, change.Identifier, change.Permissions); err != nil {
 			i.errors.Add(fmt.Errorf("failed to update action permissions for %s: %w", change.Identifier, err), "action_permissions", change.Identifier)
+		}
+	}
+
+	// Import page permissions
+	for _, change := range diff.PagePermissions {
+		if _, err := i.client.UpdatePagePermissions(ctx, change.Identifier, change.Permissions); err != nil {
+			i.errors.Add(fmt.Errorf("failed to update page permissions for %s: %w", change.Identifier, err), "page_permissions", change.Identifier)
 		}
 	}
 }

@@ -153,6 +153,7 @@ func writeTar(data *Data, outputPath string) error {
 		"integrations":          data.Integrations,
 		"blueprint_permissions": data.BlueprintPermissions,
 		"action_permissions":    data.ActionPermissions,
+		"page_permissions":      data.PagePermissions,
 	}
 
 	for dataType, items := range dataTypes {
@@ -194,6 +195,7 @@ func (d *Data) WriteJSON(w io.Writer) error {
 		"integrations":          d.Integrations,
 		"blueprint_permissions": d.BlueprintPermissions,
 		"action_permissions":    d.ActionPermissions,
+		"page_permissions":      d.PagePermissions,
 	}
 
 	encoder := json.NewEncoder(w)
