@@ -157,7 +157,15 @@ func (m *Module) Execute(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	// Import permissions (blueprint and action permissions depend on resources existing)
-	bpUpdated, actionUpdated, pageUpdated := importer.importPermissions(ctx, diffResult)
+	bpUpdated, actionUpdated, pageUpdated, permWarnings := importer.importPermissions(ctx, diffResult)
+
+	// Surface permission sanitization warnings as validation warnings
+	for _, w := range permWarnings {
+		result.Warnings = append(result.Warnings, ValidationWarning{
+			Type:    "orphaned_permission_field",
+			Message: w,
+		})
+	}
 
 	// Merge any permission errors into result
 	result.Errors = importer.errors.ToStringSlice()
@@ -1431,6 +1439,111 @@ func IsAdditionalPropertyError(err error) bool {
 	return isAdditionalPropertyError(err)
 }
 
+// isInvalidPermissionsError returns true when the Port API rejects a permissions
+// PATCH because the payload references relations or properties that don't exist
+// on the target blueprint (e.g., orphaned scorecard relations on _rule_result).
+func isInvalidPermissionsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "invalid_permissions")
+}
+
+// IsInvalidPermissionsError is the exported form for use by the migrate package.
+func IsInvalidPermissionsError(err error) bool {
+	return isInvalidPermissionsError(err)
+}
+
+// invalidPermBodyPattern extracts the JSON body from the API error string.
+// The error format is: "API request to ... failed: 422 ... Body: {JSON}"
+var invalidPermBodyPattern = regexp.MustCompile(`Body: (\{.*\})`)
+
+// ParseInvalidPermissionFields extracts the invalidRelations and
+// invalidProperties arrays from an invalid_permissions API error.
+// Returns nil slices when the error is not parseable or not an
+// invalid_permissions error.
+func ParseInvalidPermissionFields(err error) (relations, properties []string) {
+	if err == nil {
+		return nil, nil
+	}
+	matches := invalidPermBodyPattern.FindStringSubmatch(err.Error())
+	if len(matches) < 2 {
+		return nil, nil
+	}
+	var body struct {
+		Error   string `json:"error"`
+		Details struct {
+			InvalidRelations  []string `json:"invalidRelations"`
+			InvalidProperties []string `json:"invalidProperties"`
+		} `json:"details"`
+	}
+	if json.Unmarshal([]byte(matches[1]), &body) != nil {
+		return nil, nil
+	}
+	if body.Error != "invalid_permissions" {
+		return nil, nil
+	}
+	return body.Details.InvalidRelations, body.Details.InvalidProperties
+}
+
+// SanitizePermissions returns a deep copy of perms with the named relation
+// and property keys removed. Invalid relations are stripped from top-level
+// keys and from entities.updateRelations; invalid properties are stripped
+// from top-level keys and from entities.updateProperties.
+func SanitizePermissions(perms api.Permissions, invalidRelations, invalidProperties []string) api.Permissions {
+	relSet := make(map[string]bool, len(invalidRelations))
+	for _, r := range invalidRelations {
+		relSet[r] = true
+	}
+	propSet := make(map[string]bool, len(invalidProperties))
+	for _, p := range invalidProperties {
+		propSet[p] = true
+	}
+
+	// Deep-copy and strip top-level keys
+	cleaned := make(api.Permissions, len(perms))
+	for k, v := range perms {
+		if relSet[k] || propSet[k] {
+			continue
+		}
+		cleaned[k] = v
+	}
+
+	// Strip nested relation/property keys inside entities.updateRelations
+	// and entities.updateProperties where the API actually validates them.
+	entities, ok := cleaned["entities"].(map[string]interface{})
+	if !ok {
+		return cleaned
+	}
+	entitiesCopy := make(map[string]interface{}, len(entities))
+	for k, v := range entities {
+		entitiesCopy[k] = v
+	}
+
+	if ur, ok := entitiesCopy["updateRelations"].(map[string]interface{}); ok && len(relSet) > 0 {
+		urCopy := make(map[string]interface{}, len(ur))
+		for k, v := range ur {
+			if !relSet[k] {
+				urCopy[k] = v
+			}
+		}
+		entitiesCopy["updateRelations"] = urCopy
+	}
+
+	if up, ok := entitiesCopy["updateProperties"].(map[string]interface{}); ok && len(propSet) > 0 {
+		upCopy := make(map[string]interface{}, len(up))
+		for k, v := range up {
+			if !propSet[k] {
+				upCopy[k] = v
+			}
+		}
+		entitiesCopy["updateProperties"] = upCopy
+	}
+
+	cleaned["entities"] = entitiesCopy
+	return cleaned
+}
+
 // actionAuditFields are the audit/internal fields that must be stripped before
 // sending an action or automation to the Port API.
 var actionAuditFields = []string{"createdBy", "updatedBy", "createdAt", "updatedAt", "id"}
@@ -2444,15 +2557,27 @@ func (i *Importer) importIntegrations(ctx context.Context, integrations []api.In
 // importPermissions applies blueprint and action permission changes from a DiffResult.
 // Permissions are applied after all other resources have been imported so that the
 // underlying blueprints, actions, and pages are guaranteed to exist.
-// Returns the counts of successfully updated blueprint, action, and page permissions.
-func (i *Importer) importPermissions(ctx context.Context, diff *DiffResult) (bpUpdated, actionUpdated, pageUpdated int) {
+// When the API rejects a payload due to orphaned relations or properties (422
+// invalid_permissions), the offending keys are stripped and the request is retried.
+// Returns the counts of successfully updated permissions and any sanitization warnings.
+func (i *Importer) importPermissions(ctx context.Context, diff *DiffResult) (bpUpdated, actionUpdated, pageUpdated int, warnings []string) {
 	if diff == nil {
 		return
 	}
 
 	// Import blueprint permissions
 	for _, change := range diff.BlueprintPermissions {
-		if _, err := i.client.UpdateBlueprintPermissions(ctx, change.Identifier, change.Permissions); err != nil {
+		perms := change.Permissions
+		_, err := i.client.UpdateBlueprintPermissions(ctx, change.Identifier, perms)
+		if err != nil && isInvalidPermissionsError(err) {
+			relations, properties := ParseInvalidPermissionFields(err)
+			if len(relations) > 0 || len(properties) > 0 {
+				warnings = append(warnings, fmt.Sprintf("Stripped orphaned fields from %s permissions: relations=%v properties=%v", change.Identifier, relations, properties))
+				perms = SanitizePermissions(perms, relations, properties)
+				_, err = i.client.UpdateBlueprintPermissions(ctx, change.Identifier, perms)
+			}
+		}
+		if err != nil {
 			i.errors.Add(fmt.Errorf("failed to update blueprint permissions for %s: %w", change.Identifier, err), "blueprint_permissions", change.Identifier)
 		} else {
 			bpUpdated++
@@ -2461,7 +2586,17 @@ func (i *Importer) importPermissions(ctx context.Context, diff *DiffResult) (bpU
 
 	// Import action permissions
 	for _, change := range diff.ActionPermissions {
-		if _, err := i.client.UpdateActionPermissions(ctx, change.Identifier, change.Permissions); err != nil {
+		perms := change.Permissions
+		_, err := i.client.UpdateActionPermissions(ctx, change.Identifier, perms)
+		if err != nil && isInvalidPermissionsError(err) {
+			relations, properties := ParseInvalidPermissionFields(err)
+			if len(relations) > 0 || len(properties) > 0 {
+				warnings = append(warnings, fmt.Sprintf("Stripped orphaned fields from %s action permissions: relations=%v properties=%v", change.Identifier, relations, properties))
+				perms = SanitizePermissions(perms, relations, properties)
+				_, err = i.client.UpdateActionPermissions(ctx, change.Identifier, perms)
+			}
+		}
+		if err != nil {
 			i.errors.Add(fmt.Errorf("failed to update action permissions for %s: %w", change.Identifier, err), "action_permissions", change.Identifier)
 		} else {
 			actionUpdated++
@@ -2470,7 +2605,17 @@ func (i *Importer) importPermissions(ctx context.Context, diff *DiffResult) (bpU
 
 	// Import page permissions
 	for _, change := range diff.PagePermissions {
-		if _, err := i.client.UpdatePagePermissions(ctx, change.Identifier, change.Permissions); err != nil {
+		perms := change.Permissions
+		_, err := i.client.UpdatePagePermissions(ctx, change.Identifier, perms)
+		if err != nil && isInvalidPermissionsError(err) {
+			relations, properties := ParseInvalidPermissionFields(err)
+			if len(relations) > 0 || len(properties) > 0 {
+				warnings = append(warnings, fmt.Sprintf("Stripped orphaned fields from %s page permissions: relations=%v properties=%v", change.Identifier, relations, properties))
+				perms = SanitizePermissions(perms, relations, properties)
+				_, err = i.client.UpdatePagePermissions(ctx, change.Identifier, perms)
+			}
+		}
+		if err != nil {
 			i.errors.Add(fmt.Errorf("failed to update page permissions for %s: %w", change.Identifier, err), "page_permissions", change.Identifier)
 		} else {
 			pageUpdated++
