@@ -228,38 +228,28 @@ Use --include to selectively import specific resource types.`,
 				return fmt.Errorf("import failed: %w", err)
 			}
 
-			if !result.Success {
-				if outputFormat == "json" {
-					jsonResult := output.JSONResult{
-						Success: false,
-						Error:   "import failed",
-					}
-					output.PrintJSON(jsonResult)
-					return fmt.Errorf("import failed")
-				}
-				return fmt.Errorf("import failed")
-			}
-
 			// Output in JSON format if requested
 			if outputFormat == "json" {
 				jsonData := map[string]interface{}{
-					"success":              true,
-					"message":              result.Message,
-					"blueprints_created":   result.BlueprintsCreated,
-					"blueprints_updated":   result.BlueprintsUpdated,
-					"entities_created":     result.EntitiesCreated,
-					"entities_updated":     result.EntitiesUpdated,
-					"scorecards_created":   result.ScorecardsCreated,
-					"scorecards_updated":   result.ScorecardsUpdated,
-					"actions_created":      result.ActionsCreated,
-					"actions_updated":      result.ActionsUpdated,
-					"teams_created":        result.TeamsCreated,
-					"teams_updated":        result.TeamsUpdated,
-					"users_created":        result.UsersCreated,
-					"users_updated":        result.UsersUpdated,
-					"pages_created":        result.PagesCreated,
-					"pages_updated":        result.PagesUpdated,
-					"integrations_updated": result.IntegrationsUpdated,
+					"success":                       result.Success,
+					"message":                       result.Message,
+					"blueprints_created":            result.BlueprintsCreated,
+					"blueprints_updated":            result.BlueprintsUpdated,
+					"entities_created":              result.EntitiesCreated,
+					"entities_updated":              result.EntitiesUpdated,
+					"scorecards_created":            result.ScorecardsCreated,
+					"scorecards_updated":            result.ScorecardsUpdated,
+					"actions_created":               result.ActionsCreated,
+					"actions_updated":               result.ActionsUpdated,
+					"teams_created":                 result.TeamsCreated,
+					"teams_updated":                 result.TeamsUpdated,
+					"users_created":                 result.UsersCreated,
+					"users_updated":                 result.UsersUpdated,
+					"pages_created":                 result.PagesCreated,
+					"pages_updated":                 result.PagesUpdated,
+					"integrations_updated":          result.IntegrationsUpdated,
+					"blueprint_permissions_updated": result.BlueprintPermissionsUpdated,
+					"action_permissions_updated":    result.ActionPermissionsUpdated,
 				}
 				if len(result.Errors) > 0 {
 					jsonData["errors"] = result.Errors
@@ -271,11 +261,19 @@ Use --include to selectively import specific resource types.`,
 				if showPagesPipeline && len(result.SidebarPipeline) > 0 {
 					jsonData["sidebar_pipeline"] = result.SidebarPipeline
 				}
-				return output.PrintJSON(jsonData)
+				output.PrintJSON(jsonData)
+				if !result.Success {
+					return fmt.Errorf("import completed with errors")
+				}
+				return nil
 			}
 
 			// Text output
-			output.SuccessPrintln("\n✓ Import completed successfully!")
+			if result.Success {
+				output.SuccessPrintln("\n✓ Import completed successfully!")
+			} else {
+				output.WarningPrintln("\n⚠ Import completed with errors")
+			}
 			output.Printf("%s\n", result.Message)
 			if result.IgnoredRuleResultTargetRelationCount > 0 {
 				output.Printf("\n_rule_result: ignored %d relation(s) with type rule_result_target (not sent to API): %s\n",
@@ -333,6 +331,14 @@ Use --include to selectively import specific resource types.`,
 						len(result.DiffResult.IntegrationsToUpdate),
 						len(result.DiffResult.IntegrationsToSkip))
 				}
+				if len(result.DiffResult.BlueprintPermissions) > 0 {
+					output.Printf("  Blueprint permissions: %d to update\n",
+						len(result.DiffResult.BlueprintPermissions))
+				}
+				if len(result.DiffResult.ActionPermissions) > 0 {
+					output.Printf("  Action permissions: %d to update\n",
+						len(result.DiffResult.ActionPermissions))
+				}
 				output.Printf("\n")
 			}
 
@@ -344,6 +350,10 @@ Use --include to selectively import specific resource types.`,
 			output.Printf("Users created: %d, updated: %d\n", result.UsersCreated, result.UsersUpdated)
 			output.Printf("Pages created: %d, updated: %d\n", result.PagesCreated, result.PagesUpdated)
 			output.Printf("Integrations updated: %d\n", result.IntegrationsUpdated)
+			if result.BlueprintPermissionsUpdated > 0 || result.ActionPermissionsUpdated > 0 {
+				output.Printf("Blueprint permissions updated: %d\n", result.BlueprintPermissionsUpdated)
+				output.Printf("Action permissions updated: %d\n", result.ActionPermissionsUpdated)
+			}
 
 			if showPagesPipeline && len(result.SidebarPipeline) > 0 {
 				output.Printf("\nSidebar pipeline used:\n")
@@ -388,6 +398,9 @@ Use --include to selectively import specific resource types.`,
 				}
 			}
 
+			if !result.Success {
+				return fmt.Errorf("import completed with errors")
+			}
 			return nil
 		},
 	}

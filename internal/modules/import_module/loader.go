@@ -297,6 +297,30 @@ func (l *Loader) loadJSON(jsonPath string) (*export.Data, error) {
 		}
 	}
 
+	for _, key := range []string{"BlueprintPermissions", "blueprint_permissions"} {
+		if perms, ok := rawData[key].(map[string]interface{}); ok {
+			data.BlueprintPermissions = make(map[string]api.Permissions)
+			for id, p := range perms {
+				if pMap, ok := p.(map[string]interface{}); ok {
+					data.BlueprintPermissions[id] = api.Permissions(pMap)
+				}
+			}
+			break
+		}
+	}
+
+	for _, key := range []string{"ActionPermissions", "action_permissions"} {
+		if perms, ok := rawData[key].(map[string]interface{}); ok {
+			data.ActionPermissions = make(map[string]api.Permissions)
+			for id, p := range perms {
+				if pMap, ok := p.(map[string]interface{}); ok {
+					data.ActionPermissions[id] = api.Permissions(pMap)
+				}
+			}
+			break
+		}
+	}
+
 	return data, nil
 }
 

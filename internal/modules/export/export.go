@@ -183,17 +183,17 @@ func writeTar(data *Data, outputPath string) error {
 // WriteJSON encodes the Data as indented JSON into w.
 func (d *Data) WriteJSON(w io.Writer) error {
 	output := map[string]interface{}{
-		"blueprints":           d.Blueprints,
-		"entities":             d.Entities,
-		"scorecards":           d.Scorecards,
-		"actions":              d.Actions,
-		"teams":                d.Teams,
-		"users":                d.Users,
-		"_folders":             d.Folders,
-		"pages":                d.Pages,
-		"integrations":         d.Integrations,
-		"BlueprintPermissions": d.BlueprintPermissions,
-		"ActionPermissions":    d.ActionPermissions,
+		"blueprints":            d.Blueprints,
+		"entities":              d.Entities,
+		"scorecards":            d.Scorecards,
+		"actions":               d.Actions,
+		"teams":                 d.Teams,
+		"users":                 d.Users,
+		"_folders":              d.Folders,
+		"pages":                 d.Pages,
+		"integrations":          d.Integrations,
+		"blueprint_permissions": d.BlueprintPermissions,
+		"action_permissions":    d.ActionPermissions,
 	}
 
 	encoder := json.NewEncoder(w)

@@ -65,28 +65,30 @@ type ValidationWarning struct {
 
 // Result represents the result of an import operation.
 type Result struct {
-	Success             bool
-	Message             string
-	BlueprintsCreated   int
-	BlueprintsUpdated   int
-	EntitiesCreated     int
-	EntitiesUpdated     int
-	ScorecardsCreated   int
-	ScorecardsUpdated   int
-	ActionsCreated      int
-	ActionsUpdated      int
-	TeamsCreated        int
-	TeamsUpdated        int
-	UsersCreated        int
-	UsersUpdated        int
-	PagesCreated        int
-	PagesUpdated        int
-	IntegrationsUpdated int
-	Errors              []string
-	ErrorsByCategory    map[string][]string // Categorized errors for verbose output
-	Warnings            []ValidationWarning // Pre-import validation warnings
-	DiffResult          *DiffResult
-	SidebarPipeline     []string
+	Success                     bool
+	Message                     string
+	BlueprintsCreated           int
+	BlueprintsUpdated           int
+	EntitiesCreated             int
+	EntitiesUpdated             int
+	ScorecardsCreated           int
+	ScorecardsUpdated           int
+	ActionsCreated              int
+	ActionsUpdated              int
+	TeamsCreated                int
+	TeamsUpdated                int
+	UsersCreated                int
+	UsersUpdated                int
+	PagesCreated                int
+	PagesUpdated                int
+	IntegrationsUpdated         int
+	BlueprintPermissionsUpdated int
+	ActionPermissionsUpdated    int
+	Errors                      []string
+	ErrorsByCategory            map[string][]string // Categorized errors for verbose output
+	Warnings                    []ValidationWarning // Pre-import validation warnings
+	DiffResult                  *DiffResult
+	SidebarPipeline             []string
 	// IgnoredRuleResultTargetRelationCount is how many _rule_result relations with type rule_result_target were omitted from API payloads.
 	IgnoredRuleResultTargetRelationCount int
 	// IgnoredRuleResultTargetRelationKeys lists relation identifiers omitted (sorted, unique).
@@ -154,13 +156,20 @@ func (m *Module) Execute(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	// Import permissions (blueprint and action permissions depend on resources existing)
-	importer.importPermissions(ctx, diffResult)
+	bpUpdated, actionUpdated := importer.importPermissions(ctx, diffResult)
 
 	// Merge any permission errors into result
 	result.Errors = importer.errors.ToStringSlice()
+	result.BlueprintPermissionsUpdated = bpUpdated
+	result.ActionPermissionsUpdated = actionUpdated
 
-	result.Success = true
-	result.Message = "Successfully imported data"
+	if len(result.Errors) > 0 {
+		result.Success = false
+		result.Message = fmt.Sprintf("Import completed with %d error(s)", len(result.Errors))
+	} else {
+		result.Success = true
+		result.Message = "Successfully imported data"
+	}
 	result.DiffResult = diffResult
 	result.SidebarPipeline = DescribeSidebarPipeline(sidebarPipeline)
 	return result, nil
@@ -170,24 +179,26 @@ func (m *Module) Execute(ctx context.Context, opts Options) (*Result, error) {
 func (m *Module) generateDryRunResult(data *export.Data, diffResult *DiffResult, _ Options) *Result {
 	if diffResult != nil {
 		return &Result{
-			Success:             true,
-			Message:             "Validation passed (dry run - no changes applied)",
-			BlueprintsCreated:   len(diffResult.BlueprintsToCreate),
-			BlueprintsUpdated:   len(diffResult.BlueprintsToUpdate),
-			EntitiesCreated:     len(diffResult.EntitiesToCreate),
-			EntitiesUpdated:     len(diffResult.EntitiesToUpdate),
-			ScorecardsCreated:   len(diffResult.ScorecardsToCreate),
-			ScorecardsUpdated:   len(diffResult.ScorecardsToUpdate),
-			ActionsCreated:      len(diffResult.ActionsToCreate),
-			ActionsUpdated:      len(diffResult.ActionsToUpdate),
-			TeamsCreated:        len(diffResult.TeamsToCreate),
-			TeamsUpdated:        len(diffResult.TeamsToUpdate),
-			UsersCreated:        len(diffResult.UsersToCreate),
-			UsersUpdated:        len(diffResult.UsersToUpdate),
-			PagesCreated:        len(diffResult.PagesToCreate),
-			PagesUpdated:        len(diffResult.PagesToUpdate),
-			IntegrationsUpdated: len(diffResult.IntegrationsToUpdate),
-			DiffResult:          diffResult,
+			Success:                     true,
+			Message:                     "Validation passed (dry run - no changes applied)",
+			BlueprintsCreated:           len(diffResult.BlueprintsToCreate),
+			BlueprintsUpdated:           len(diffResult.BlueprintsToUpdate),
+			EntitiesCreated:             len(diffResult.EntitiesToCreate),
+			EntitiesUpdated:             len(diffResult.EntitiesToUpdate),
+			ScorecardsCreated:           len(diffResult.ScorecardsToCreate),
+			ScorecardsUpdated:           len(diffResult.ScorecardsToUpdate),
+			ActionsCreated:              len(diffResult.ActionsToCreate),
+			ActionsUpdated:              len(diffResult.ActionsToUpdate),
+			TeamsCreated:                len(diffResult.TeamsToCreate),
+			TeamsUpdated:                len(diffResult.TeamsToUpdate),
+			UsersCreated:                len(diffResult.UsersToCreate),
+			UsersUpdated:                len(diffResult.UsersToUpdate),
+			PagesCreated:                len(diffResult.PagesToCreate),
+			PagesUpdated:                len(diffResult.PagesToUpdate),
+			IntegrationsUpdated:         len(diffResult.IntegrationsToUpdate),
+			BlueprintPermissionsUpdated: len(diffResult.BlueprintPermissions),
+			ActionPermissionsUpdated:    len(diffResult.ActionPermissions),
+			DiffResult:                  diffResult,
 		}
 	}
 
@@ -2430,7 +2441,8 @@ func (i *Importer) importIntegrations(ctx context.Context, integrations []api.In
 // importPermissions applies blueprint and action permission changes from a DiffResult.
 // Permissions are applied after all other resources have been imported so that the
 // underlying blueprints and actions are guaranteed to exist.
-func (i *Importer) importPermissions(ctx context.Context, diff *DiffResult) {
+// Returns the counts of successfully updated blueprint and action permissions.
+func (i *Importer) importPermissions(ctx context.Context, diff *DiffResult) (bpUpdated, actionUpdated int) {
 	if diff == nil {
 		return
 	}
@@ -2439,6 +2451,8 @@ func (i *Importer) importPermissions(ctx context.Context, diff *DiffResult) {
 	for _, change := range diff.BlueprintPermissions {
 		if _, err := i.client.UpdateBlueprintPermissions(ctx, change.Identifier, change.Permissions); err != nil {
 			i.errors.Add(fmt.Errorf("failed to update blueprint permissions for %s: %w", change.Identifier, err), "blueprint_permissions", change.Identifier)
+		} else {
+			bpUpdated++
 		}
 	}
 
@@ -2446,8 +2460,11 @@ func (i *Importer) importPermissions(ctx context.Context, diff *DiffResult) {
 	for _, change := range diff.ActionPermissions {
 		if _, err := i.client.UpdateActionPermissions(ctx, change.Identifier, change.Permissions); err != nil {
 			i.errors.Add(fmt.Errorf("failed to update action permissions for %s: %w", change.Identifier, err), "action_permissions", change.Identifier)
+		} else {
+			actionUpdated++
 		}
 	}
+	return
 }
 
 // applyDataExclusion filters data in-place before diffing/importing.
