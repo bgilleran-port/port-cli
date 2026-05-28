@@ -84,6 +84,7 @@ type Result struct {
 	IntegrationsUpdated         int
 	BlueprintPermissionsUpdated int
 	ActionPermissionsUpdated    int
+	PagePermissionsUpdated      int
 	Errors                      []string
 	ErrorsByCategory            map[string][]string // Categorized errors for verbose output
 	Warnings                    []ValidationWarning // Pre-import validation warnings
@@ -156,12 +157,13 @@ func (m *Module) Execute(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	// Import permissions (blueprint and action permissions depend on resources existing)
-	bpUpdated, actionUpdated := importer.importPermissions(ctx, diffResult)
+	bpUpdated, actionUpdated, pageUpdated := importer.importPermissions(ctx, diffResult)
 
 	// Merge any permission errors into result
 	result.Errors = importer.errors.ToStringSlice()
 	result.BlueprintPermissionsUpdated = bpUpdated
 	result.ActionPermissionsUpdated = actionUpdated
+	result.PagePermissionsUpdated = pageUpdated
 
 	if len(result.Errors) > 0 {
 		result.Success = false
@@ -198,6 +200,7 @@ func (m *Module) generateDryRunResult(data *export.Data, diffResult *DiffResult,
 			IntegrationsUpdated:         len(diffResult.IntegrationsToUpdate),
 			BlueprintPermissionsUpdated: len(diffResult.BlueprintPermissions),
 			ActionPermissionsUpdated:    len(diffResult.ActionPermissions),
+			PagePermissionsUpdated:      len(diffResult.PagePermissions),
 			DiffResult:                  diffResult,
 		}
 	}
@@ -2440,9 +2443,9 @@ func (i *Importer) importIntegrations(ctx context.Context, integrations []api.In
 
 // importPermissions applies blueprint and action permission changes from a DiffResult.
 // Permissions are applied after all other resources have been imported so that the
-// underlying blueprints and actions are guaranteed to exist.
-// Returns the counts of successfully updated blueprint and action permissions.
-func (i *Importer) importPermissions(ctx context.Context, diff *DiffResult) (bpUpdated, actionUpdated int) {
+// underlying blueprints, actions, and pages are guaranteed to exist.
+// Returns the counts of successfully updated blueprint, action, and page permissions.
+func (i *Importer) importPermissions(ctx context.Context, diff *DiffResult) (bpUpdated, actionUpdated, pageUpdated int) {
 	if diff == nil {
 		return
 	}
@@ -2462,6 +2465,15 @@ func (i *Importer) importPermissions(ctx context.Context, diff *DiffResult) (bpU
 			i.errors.Add(fmt.Errorf("failed to update action permissions for %s: %w", change.Identifier, err), "action_permissions", change.Identifier)
 		} else {
 			actionUpdated++
+		}
+	}
+
+	// Import page permissions
+	for _, change := range diff.PagePermissions {
+		if _, err := i.client.UpdatePagePermissions(ctx, change.Identifier, change.Permissions); err != nil {
+			i.errors.Add(fmt.Errorf("failed to update page permissions for %s: %w", change.Identifier, err), "page_permissions", change.Identifier)
+		} else {
+			pageUpdated++
 		}
 	}
 	return

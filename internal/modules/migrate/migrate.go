@@ -82,6 +82,7 @@ type Result struct {
 	IntegrationsSkipped                  int
 	BlueprintPermissionsUpdated          int
 	ActionPermissionsUpdated             int
+	PagePermissionsUpdated               int
 	Errors                               []string
 	DiffResult                           *import_module.DiffResult
 	IgnoredRuleResultTargetRelationCount int
@@ -166,6 +167,7 @@ func (m *Module) generateDryRunResult(diffResult *import_module.DiffResult) *Res
 		IntegrationsSkipped:         len(diffResult.IntegrationsToSkip),
 		BlueprintPermissionsUpdated: len(diffResult.BlueprintPermissions),
 		ActionPermissionsUpdated:    len(diffResult.ActionPermissions),
+		PagePermissionsUpdated:      len(diffResult.PagePermissions),
 		DiffResult:                  diffResult,
 	}
 }
@@ -241,6 +243,7 @@ func (m *Module) exportFromSource(ctx context.Context, opts Options) (*export.Da
 		Integrations:         []api.Integration{},
 		BlueprintPermissions: make(map[string]api.Permissions),
 		ActionPermissions:    make(map[string]api.Permissions),
+		PagePermissions:      make(map[string]api.Permissions),
 	}
 
 	// Use errgroup for concurrent collection
@@ -443,6 +446,27 @@ func (m *Module) exportFromSource(ctx context.Context, opts Options) (*export.Da
 			data.Folders = folders
 			data.Pages = pages
 			mu.Unlock()
+
+			// Fetch permissions for each page
+			if shouldCollect("page-permissions", opts.IncludeResources) || len(opts.IncludeResources) == 0 {
+				for _, page := range pages {
+					pageID, ok := page["identifier"].(string)
+					if !ok || pageID == "" {
+						continue
+					}
+					pID := pageID
+					g.Go(func() error {
+						perms, err := m.sourceClient.GetPagePermissions(ctx, pID)
+						if err != nil {
+							return nil
+						}
+						mu.Lock()
+						data.PagePermissions[pID] = perms
+						mu.Unlock()
+						return nil
+					})
+				}
+			}
 			return nil
 		})
 	}
@@ -1412,6 +1436,13 @@ func (m *Module) importToTarget(ctx context.Context, data *export.Data, diffResu
 			result.Errors = append(result.Errors, fmt.Sprintf("Action permissions %s: %v", change.Identifier, err))
 		} else {
 			result.ActionPermissionsUpdated++
+		}
+	}
+	for _, change := range diffResult.PagePermissions {
+		if _, err := m.targetClient.UpdatePagePermissions(origCtx, change.Identifier, change.Permissions); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("Page permissions %s: %v", change.Identifier, err))
+		} else {
+			result.PagePermissionsUpdated++
 		}
 	}
 

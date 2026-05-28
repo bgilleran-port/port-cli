@@ -942,6 +942,42 @@ func (c *Client) UpdateActionPermissions(ctx context.Context, actionIdentifier s
 	return result.Permissions, nil
 }
 
+// GetPagePermissions retrieves permissions for a page.
+func (c *Client) GetPagePermissions(ctx context.Context, pageIdentifier string) (Permissions, error) {
+	resp, err := c.request(ctx, "GET", fmt.Sprintf("/pages/%s/permissions", pageIdentifier), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Permissions Permissions `json:"permissions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode page permissions: %w", err)
+	}
+
+	return result.Permissions, nil
+}
+
+// UpdatePagePermissions updates permissions for a page.
+func (c *Client) UpdatePagePermissions(ctx context.Context, pageIdentifier string, permissions Permissions) (Permissions, error) {
+	resp, err := c.request(ctx, "PATCH", fmt.Sprintf("/pages/%s/permissions", pageIdentifier), permissions, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Permissions Permissions `json:"permissions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode updated page permissions: %w", err)
+	}
+
+	return result.Permissions, nil
+}
+
 // GetSkillGroups retrieves all skill_group blueprint entities from Port.
 func (c *Client) GetSkillGroups(ctx context.Context) ([]Entity, error) {
 	entities, err := c.SearchEntities(ctx, "skill_group", map[string]interface{}{
