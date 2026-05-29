@@ -115,11 +115,12 @@ Use --include to selectively migrate specific resource types.`,
 					"integrations":          true,
 					"blueprint-permissions": true,
 					"action-permissions":    true,
+					"page-permissions":      true,
 				}
 
 				for _, r := range includeList {
 					if !validResources[r] {
-						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations, blueprint-permissions, action-permissions", r)
+						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations, blueprint-permissions, action-permissions, page-permissions", r)
 					}
 				}
 
@@ -242,34 +243,38 @@ Use --include to selectively migrate specific resource types.`,
 			// Output in JSON format if requested
 			if outputFormat == "json" {
 				jsonData := map[string]interface{}{
-					"success":              true,
-					"message":              result.Message,
-					"blueprints_created":   result.BlueprintsCreated,
-					"blueprints_updated":   result.BlueprintsUpdated,
-					"blueprints_skipped":   result.BlueprintsSkipped,
-					"entities_created":     result.EntitiesCreated,
-					"entities_updated":     result.EntitiesUpdated,
-					"entities_skipped":     result.EntitiesSkipped,
-					"scorecards_created":   result.ScorecardsCreated,
-					"scorecards_updated":   result.ScorecardsUpdated,
-					"scorecards_skipped":   result.ScorecardsSkipped,
-					"actions_created":      result.ActionsCreated,
-					"actions_updated":      result.ActionsUpdated,
-					"actions_skipped":      result.ActionsSkipped,
-					"teams_created":        result.TeamsCreated,
-					"teams_updated":        result.TeamsUpdated,
-					"teams_skipped":        result.TeamsSkipped,
-					"users_created":        result.UsersCreated,
-					"users_updated":        result.UsersUpdated,
-					"users_skipped":        result.UsersSkipped,
-					"pages_created":        result.PagesCreated,
-					"pages_updated":        result.PagesUpdated,
-					"pages_skipped":        result.PagesSkipped,
-					"integrations_updated": result.IntegrationsUpdated,
-					"integrations_skipped": result.IntegrationsSkipped,
+					"success":                  true,
+					"message":                  result.Message,
+					"blueprints_created":       result.BlueprintsCreated,
+					"blueprints_updated":       result.BlueprintsUpdated,
+					"blueprints_skipped":       result.BlueprintsSkipped,
+					"entities_created":         result.EntitiesCreated,
+					"entities_updated":         result.EntitiesUpdated,
+					"entities_skipped":         result.EntitiesSkipped,
+					"scorecards_created":       result.ScorecardsCreated,
+					"scorecards_updated":       result.ScorecardsUpdated,
+					"scorecards_skipped":       result.ScorecardsSkipped,
+					"actions_created":          result.ActionsCreated,
+					"actions_updated":          result.ActionsUpdated,
+					"actions_skipped":          result.ActionsSkipped,
+					"teams_created":            result.TeamsCreated,
+					"teams_updated":            result.TeamsUpdated,
+					"teams_skipped":            result.TeamsSkipped,
+					"users_created":            result.UsersCreated,
+					"users_updated":            result.UsersUpdated,
+					"users_skipped":            result.UsersSkipped,
+					"pages_created":            result.PagesCreated,
+					"pages_updated":            result.PagesUpdated,
+					"pages_skipped":            result.PagesSkipped,
+					"integrations_updated":     result.IntegrationsUpdated,
+					"integrations_skipped":     result.IntegrationsSkipped,
+					"page_permissions_updated": result.PagePermissionsUpdated,
 				}
 				if len(result.Errors) > 0 {
 					jsonData["errors"] = result.Errors
+				}
+				if len(result.Warnings) > 0 {
+					jsonData["warnings"] = result.Warnings
 				}
 				if result.IgnoredRuleResultTargetRelationCount > 0 {
 					jsonData["ignored_rule_result_target_relations_count"] = result.IgnoredRuleResultTargetRelationCount
@@ -348,6 +353,16 @@ Use --include to selectively migrate specific resource types.`,
 			output.Printf("Users created: %d, updated: %d, skipped: %d\n", result.UsersCreated, result.UsersUpdated, result.UsersSkipped)
 			output.Printf("Pages created: %d, updated: %d, skipped: %d\n", result.PagesCreated, result.PagesUpdated, result.PagesSkipped)
 			output.Printf("Integrations updated: %d, skipped: %d\n", result.IntegrationsUpdated, result.IntegrationsSkipped)
+			if result.PagePermissionsUpdated > 0 {
+				output.Printf("Page permissions updated: %d\n", result.PagePermissionsUpdated)
+			}
+
+			if len(result.Warnings) > 0 {
+				output.Printf("\nWarnings:\n")
+				for _, w := range result.Warnings {
+					output.WarningPrintln(fmt.Sprintf("  ⚠ %s", w))
+				}
+			}
 
 			if len(result.Errors) > 0 {
 				output.Printf("\nWarnings:\n")

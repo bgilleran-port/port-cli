@@ -44,6 +44,9 @@ dmypy.json
 *.dylib
 bin/
 dist/
+port-darwin-*
+port-linux-*
+port-windows-*
 
 # Test binary, built with `go test -c`
 *.test

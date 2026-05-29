@@ -94,11 +94,12 @@ Use --include to selectively import specific resource types.`,
 					"integrations":          true,
 					"blueprint-permissions": true,
 					"action-permissions":    true,
+					"page-permissions":      true,
 				}
 
 				for _, r := range includeList {
 					if !validResources[r] {
-						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations, blueprint-permissions, action-permissions", r)
+						return fmt.Errorf("invalid resource: %s. Valid resources: blueprints, entities, scorecards, actions, teams, users, automations, pages, integrations, blueprint-permissions, action-permissions, page-permissions", r)
 					}
 				}
 
@@ -250,6 +251,7 @@ Use --include to selectively import specific resource types.`,
 					"integrations_updated":          result.IntegrationsUpdated,
 					"blueprint_permissions_updated": result.BlueprintPermissionsUpdated,
 					"action_permissions_updated":    result.ActionPermissionsUpdated,
+					"page_permissions_updated":      result.PagePermissionsUpdated,
 				}
 				if len(result.Errors) > 0 {
 					jsonData["errors"] = result.Errors
@@ -339,6 +341,10 @@ Use --include to selectively import specific resource types.`,
 					output.Printf("  Action permissions: %d to update\n",
 						len(result.DiffResult.ActionPermissions))
 				}
+				if len(result.DiffResult.PagePermissions) > 0 {
+					output.Printf("  Page permissions: %d to update\n",
+						len(result.DiffResult.PagePermissions))
+				}
 				output.Printf("\n")
 			}
 
@@ -350,9 +356,10 @@ Use --include to selectively import specific resource types.`,
 			output.Printf("Users created: %d, updated: %d\n", result.UsersCreated, result.UsersUpdated)
 			output.Printf("Pages created: %d, updated: %d\n", result.PagesCreated, result.PagesUpdated)
 			output.Printf("Integrations updated: %d\n", result.IntegrationsUpdated)
-			if result.BlueprintPermissionsUpdated > 0 || result.ActionPermissionsUpdated > 0 {
+			if result.BlueprintPermissionsUpdated > 0 || result.ActionPermissionsUpdated > 0 || result.PagePermissionsUpdated > 0 {
 				output.Printf("Blueprint permissions updated: %d\n", result.BlueprintPermissionsUpdated)
 				output.Printf("Action permissions updated: %d\n", result.ActionPermissionsUpdated)
+				output.Printf("Page permissions updated: %d\n", result.PagePermissionsUpdated)
 			}
 
 			if showPagesPipeline && len(result.SidebarPipeline) > 0 {

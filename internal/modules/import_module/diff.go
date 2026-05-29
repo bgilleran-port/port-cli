@@ -44,6 +44,7 @@ type DiffResult struct {
 	IntegrationsToSkip   []api.Integration
 	BlueprintPermissions []PermissionsChange
 	ActionPermissions    []PermissionsChange
+	PagePermissions      []PermissionsChange
 }
 
 // DiffComparer compares import data with current organization state.
@@ -84,6 +85,9 @@ func (d *DiffComparer) Compare(ctx context.Context, importData *export.Data, opt
 	}
 	if shouldImport("action-permissions", opts.IncludeResources) {
 		result.ActionPermissions = comparePermissions(currentData.ActionPermissions, importData.ActionPermissions)
+	}
+	if shouldImport("page-permissions", opts.IncludeResources) {
+		result.PagePermissions = comparePermissions(currentData.PagePermissions, importData.PagePermissions)
 	}
 
 	return result, nil

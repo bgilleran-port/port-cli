@@ -82,7 +82,9 @@ type Result struct {
 	IntegrationsSkipped                  int
 	BlueprintPermissionsUpdated          int
 	ActionPermissionsUpdated             int
+	PagePermissionsUpdated               int
 	Errors                               []string
+	Warnings                             []string
 	DiffResult                           *import_module.DiffResult
 	IgnoredRuleResultTargetRelationCount int
 	IgnoredRuleResultTargetRelationKeys  []string
@@ -166,6 +168,7 @@ func (m *Module) generateDryRunResult(diffResult *import_module.DiffResult) *Res
 		IntegrationsSkipped:         len(diffResult.IntegrationsToSkip),
 		BlueprintPermissionsUpdated: len(diffResult.BlueprintPermissions),
 		ActionPermissionsUpdated:    len(diffResult.ActionPermissions),
+		PagePermissionsUpdated:      len(diffResult.PagePermissions),
 		DiffResult:                  diffResult,
 	}
 }
@@ -241,6 +244,7 @@ func (m *Module) exportFromSource(ctx context.Context, opts Options) (*export.Da
 		Integrations:         []api.Integration{},
 		BlueprintPermissions: make(map[string]api.Permissions),
 		ActionPermissions:    make(map[string]api.Permissions),
+		PagePermissions:      make(map[string]api.Permissions),
 	}
 
 	// Use errgroup for concurrent collection
@@ -443,6 +447,30 @@ func (m *Module) exportFromSource(ctx context.Context, opts Options) (*export.Da
 			data.Folders = folders
 			data.Pages = pages
 			mu.Unlock()
+
+			// Fetch permissions for each page
+			if shouldCollect("page-permissions", opts.IncludeResources) || len(opts.IncludeResources) == 0 {
+				for _, page := range pages {
+					pageID, ok := page["identifier"].(string)
+					if !ok || pageID == "" {
+						continue
+					}
+					pID := pageID
+					g.Go(func() error {
+						perms, err := m.sourceClient.GetPagePermissions(ctx, pID)
+						if err != nil {
+							mu.Lock()
+							data.Warnings = append(data.Warnings, fmt.Sprintf("failed to fetch permissions for page %s: %v", pID, err))
+							mu.Unlock()
+							return nil
+						}
+						mu.Lock()
+						data.PagePermissions[pID] = perms
+						mu.Unlock()
+						return nil
+					})
+				}
+			}
 			return nil
 		})
 	}
@@ -1401,17 +1429,54 @@ func (m *Module) importToTarget(ctx context.Context, data *export.Data, diffResu
 
 	// Import permissions (blueprint and action permissions depend on resources existing)
 	for _, change := range diffResult.BlueprintPermissions {
-		if _, err := m.targetClient.UpdateBlueprintPermissions(origCtx, change.Identifier, change.Permissions); err != nil {
+		perms := change.Permissions
+		_, err := m.targetClient.UpdateBlueprintPermissions(origCtx, change.Identifier, perms)
+		if err != nil && import_module.IsInvalidPermissionsError(err) {
+			relations, properties := import_module.ParseInvalidPermissionFields(err)
+			if len(relations) > 0 || len(properties) > 0 {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("Stripped orphaned fields from %s permissions: relations=%v properties=%v", change.Identifier, relations, properties))
+				perms = import_module.SanitizePermissions(perms, relations, properties)
+				_, err = m.targetClient.UpdateBlueprintPermissions(origCtx, change.Identifier, perms)
+			}
+		}
+		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("Blueprint permissions %s: %v", change.Identifier, err))
 		} else {
 			result.BlueprintPermissionsUpdated++
 		}
 	}
 	for _, change := range diffResult.ActionPermissions {
-		if _, err := m.targetClient.UpdateActionPermissions(origCtx, change.Identifier, change.Permissions); err != nil {
+		perms := change.Permissions
+		_, err := m.targetClient.UpdateActionPermissions(origCtx, change.Identifier, perms)
+		if err != nil && import_module.IsInvalidPermissionsError(err) {
+			relations, properties := import_module.ParseInvalidPermissionFields(err)
+			if len(relations) > 0 || len(properties) > 0 {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("Stripped orphaned fields from %s action permissions: relations=%v properties=%v", change.Identifier, relations, properties))
+				perms = import_module.SanitizePermissions(perms, relations, properties)
+				_, err = m.targetClient.UpdateActionPermissions(origCtx, change.Identifier, perms)
+			}
+		}
+		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("Action permissions %s: %v", change.Identifier, err))
 		} else {
 			result.ActionPermissionsUpdated++
+		}
+	}
+	for _, change := range diffResult.PagePermissions {
+		perms := change.Permissions
+		_, err := m.targetClient.UpdatePagePermissions(origCtx, change.Identifier, perms)
+		if err != nil && import_module.IsInvalidPermissionsError(err) {
+			relations, properties := import_module.ParseInvalidPermissionFields(err)
+			if len(relations) > 0 || len(properties) > 0 {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("Stripped orphaned fields from %s page permissions: relations=%v properties=%v", change.Identifier, relations, properties))
+				perms = import_module.SanitizePermissions(perms, relations, properties)
+				_, err = m.targetClient.UpdatePagePermissions(origCtx, change.Identifier, perms)
+			}
+		}
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("Page permissions %s: %v", change.Identifier, err))
+		} else {
+			result.PagePermissionsUpdated++
 		}
 	}
 
