@@ -489,7 +489,6 @@ func (i *Importer) importBlueprints(ctx context.Context, blueprints []api.Bluepr
 			continue
 		}
 
-		// Extract and store relations
 		if relations, ok := bp["relations"].(map[string]interface{}); ok && len(relations) > 0 {
 			storedRelations[id] = relations
 		}
@@ -508,7 +507,6 @@ func (i *Importer) importBlueprints(ctx context.Context, blueprints []api.Bluepr
 			storedOwnership[id] = ownership
 		}
 
-		// Strip both relations AND dependent fields for phase 1
 		stripped := StripDependentFields(bp)
 		stripped = StripRelations(stripped)
 		strippedBPs = append(strippedBPs, stripped)
@@ -891,7 +889,16 @@ func (i *Importer) createOrUpdateBlueprint(ctx context.Context, bp api.Blueprint
 		if id == "_rule_result" {
 			_, updateErr = i.client.PatchBlueprint(ctx, id, sendBP)
 		} else {
-			_, updateErr = i.client.UpdateBlueprint(ctx, id, sendBP)
+			// Fetch existing blueprint and merge to avoid destroying fields
+			// (like relations) that were stripped for Phase 1 ordering.
+			existing, fetchErr := i.client.GetBlueprint(ctx, id)
+			if fetchErr != nil {
+				return false, false, fetchErr
+			}
+			for k, v := range sendBP {
+				existing[k] = v
+			}
+			_, updateErr = i.client.UpdateBlueprint(ctx, id, existing)
 		}
 		if updateErr != nil {
 			return false, false, updateErr

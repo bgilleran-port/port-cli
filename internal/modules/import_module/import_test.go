@@ -1350,3 +1350,193 @@ func TestImportPermissions_PagePermissions_RetryStillFails(t *testing.T) {
 		t.Errorf("expected 1 error from failed retry, got %d: %v", len(errs), errs)
 	}
 }
+
+// TestImportBlueprints_Phase1MergePreservesRelations verifies the core safety
+// mechanism: Phase 1 strips relations for ordering, but the fetch-and-merge on
+// the 409 update path preserves the existing relation definitions so entity
+// relation data is never cascade-deleted by a bare PUT.
+// Phase 2a then restores the import file's relations as the final state.
+func TestImportBlueprints_Phase1MergePreservesRelations(t *testing.T) {
+	var mu sync.Mutex
+	var putBodies []map[string]interface{}
+
+	_, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if authHandler(w, r) {
+			return
+		}
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/blueprints":
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "Conflict"})
+			return
+		case r.Method == http.MethodGet && r.URL.Path == "/blueprints/service":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok": true,
+				"blueprint": map[string]interface{}{
+					"identifier": "service",
+					"title":      "Service",
+					"relations": map[string]interface{}{
+						"system": map[string]interface{}{"target": "system"},
+					},
+				},
+			})
+			return
+		case r.Method == http.MethodGet && r.URL.Path == "/blueprints":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok":         true,
+				"blueprints": []map[string]interface{}{{"identifier": "service"}, {"identifier": "system"}},
+			})
+			return
+		case r.Method == http.MethodPut && r.URL.Path == "/blueprints/service":
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			mu.Lock()
+			putBodies = append(putBodies, body)
+			mu.Unlock()
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "blueprint": body})
+			return
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	importer := NewImporter(client)
+	result := &Result{}
+	blueprints := []api.Blueprint{
+		{
+			"identifier": "service",
+			"title":      "Service",
+			"relations": map[string]interface{}{
+				"system": map[string]interface{}{"target": "system"},
+			},
+		},
+	}
+
+	if err := importer.importBlueprints(context.Background(), blueprints, result); err != nil {
+		t.Fatalf("importBlueprints returned error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(putBodies) == 0 {
+		t.Fatal("expected at least one PUT to /blueprints/service but none was recorded")
+	}
+
+	// Phase 1 PUT: relations were stripped from the import payload, but the
+	// fetch-and-merge should have preserved the existing relations from the target.
+	phase1Body := putBodies[0]
+	relations, ok := phase1Body["relations"].(map[string]interface{})
+	if !ok || len(relations) == 0 {
+		t.Fatalf("Phase 1 PUT should preserve existing relations via merge, got %v", phase1Body["relations"])
+	}
+	if _, hasSystem := relations["system"]; !hasSystem {
+		t.Fatalf("Phase 1 PUT should preserve 'system' relation, got %v", relations)
+	}
+
+	// Phase 2a PUT: should contain the import file's relations.
+	if len(putBodies) < 2 {
+		t.Fatal("expected a Phase 2a PUT to restore import relations")
+	}
+	phase2Body := putBodies[1]
+	phase2Rels, ok := phase2Body["relations"].(map[string]interface{})
+	if !ok || len(phase2Rels) == 0 {
+		t.Fatalf("Phase 2a PUT should contain import relations, got %v", phase2Body["relations"])
+	}
+}
+
+// TestImportBlueprints_FetchAndMerge_PreservesExistingFields verifies that when
+// a blueprint update is triggered (409 on create), the existing blueprint is fetched
+// and merged so that fields absent from the import payload are not destroyed.
+func TestImportBlueprints_FetchAndMerge_PreservesExistingFields(t *testing.T) {
+	var mu sync.Mutex
+	var putBody map[string]interface{}
+
+	_, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if authHandler(w, r) {
+			return
+		}
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/blueprints":
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "Conflict"})
+			return
+		case r.Method == http.MethodGet && r.URL.Path == "/blueprints/service":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok": true,
+				"blueprint": map[string]interface{}{
+					"identifier": "service",
+					"title":      "Service",
+					"relations": map[string]interface{}{
+						"system": map[string]interface{}{"target": "system"},
+					},
+					"calculationProperties": map[string]interface{}{
+						"daysSinceCreation": map[string]interface{}{"type": "number"},
+					},
+				},
+			})
+			return
+		case r.Method == http.MethodGet && r.URL.Path == "/blueprints":
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ok":         true,
+				"blueprints": []map[string]interface{}{{"identifier": "service"}, {"identifier": "system"}},
+			})
+			return
+		case r.Method == http.MethodPut && r.URL.Path == "/blueprints/service":
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			mu.Lock()
+			putBody = body
+			mu.Unlock()
+			json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "blueprint": body})
+			return
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	importer := NewImporter(client)
+	result := &Result{}
+
+	// Import a blueprint that has been stripped of relations and dependent
+	// fields (simulating what Phase 1 does when skipEntities=false).
+	blueprints := []api.Blueprint{
+		{
+			"identifier": "service",
+			"title":      "Service Updated",
+		},
+	}
+
+	if err := importer.importBlueprints(context.Background(), blueprints, result); err != nil {
+		t.Fatalf("importBlueprints returned error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if putBody == nil {
+		t.Fatal("expected a PUT to /blueprints/service but none was recorded")
+	}
+
+	// The title should be updated
+	if putBody["title"] != "Service Updated" {
+		t.Fatalf("expected title 'Service Updated', got %v", putBody["title"])
+	}
+
+	// Relations from the existing blueprint should be preserved (merged in)
+	relations, ok := putBody["relations"].(map[string]interface{})
+	if !ok || len(relations) == 0 {
+		t.Fatalf("expected existing relations to be preserved in PUT body, got %v", putBody["relations"])
+	}
+	if _, hasSystem := relations["system"]; !hasSystem {
+		t.Fatalf("expected 'system' relation to be preserved, got %v", relations)
+	}
+
+	// calculationProperties from the existing blueprint should also be preserved
+	calcProps, ok := putBody["calculationProperties"].(map[string]interface{})
+	if !ok || len(calcProps) == 0 {
+		t.Fatalf("expected existing calculationProperties to be preserved, got %v", putBody["calculationProperties"])
+	}
+}

@@ -723,11 +723,20 @@ func (m *Module) importToTarget(ctx context.Context, data *export.Data, diffResu
 				if identifier == "_rule_result" {
 					_, err = m.targetClient.PatchBlueprint(ctx, identifier, apiBp)
 				} else {
-					_, err = m.targetClient.UpdateBlueprint(ctx, identifier, apiBp)
+					existing, fetchErr := m.targetClient.GetBlueprint(ctx, identifier)
+					if fetchErr != nil {
+						mu.Lock()
+						result.Errors = append(result.Errors, fmt.Sprintf("Blueprint %s: %v", identifier, fetchErr))
+						mu.Unlock()
+						return nil
+					}
+					for k, v := range apiBp {
+						existing[k] = v
+					}
+					_, err = m.targetClient.UpdateBlueprint(ctx, identifier, existing)
 				}
 				if err != nil {
 					mu.Lock()
-					// Check if it's a relation error - if so, we'll retry in second pass
 					if import_module.IsRelationError(err) {
 						failedBlueprints[identifier] = bp
 						failedBlueprintActions[identifier] = action
@@ -778,7 +787,17 @@ func (m *Module) importToTarget(ctx context.Context, data *export.Data, diffResu
 					if bpID == "_rule_result" {
 						_, err = m.targetClient.PatchBlueprint(ctx, bpID, apiBp)
 					} else {
-						_, err = m.targetClient.UpdateBlueprint(ctx, bpID, apiBp)
+						existing, fetchErr := m.targetClient.GetBlueprint(ctx, bpID)
+						if fetchErr != nil {
+							mu.Lock()
+							result.Errors = append(result.Errors, fmt.Sprintf("Blueprint %s: %v", bpID, fetchErr))
+							mu.Unlock()
+							return nil
+						}
+						for k, v := range apiBp {
+							existing[k] = v
+						}
+						_, err = m.targetClient.UpdateBlueprint(ctx, bpID, existing)
 					}
 					if err != nil {
 						mu.Lock()
